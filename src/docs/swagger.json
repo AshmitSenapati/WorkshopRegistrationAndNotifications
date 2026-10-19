@@ -1,0 +1,158 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Workshop Registration & Notifications API",
+    "version": "1.0.0",
+    "description": "Production-grade backend implementing reliable workshop registration, transactional outbox pattern, asynchronous notifications, and idempotent cancellation."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3000",
+      "description": "Local API Server"
+    }
+  ],
+  "paths": {
+    "/api/health": {
+      "get": {
+        "summary": "Application health check",
+        "tags": ["System"],
+        "responses": {
+          "200": { "description": "System is healthy and database is connected" },
+          "503": { "description": "Database disconnected or service degraded" }
+        }
+      }
+    },
+    "/api/workshops": {
+      "post": {
+        "summary": "Create a new workshop",
+        "tags": ["Workshops"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["title", "description", "organizerId"],
+                "properties": {
+                  "title": { "type": "string", "example": "Building Resilient Distributed Systems" },
+                  "description": { "type": "string", "example": "Deep dive into transactional outboxes and idempotency" },
+                  "organizerId": { "type": "string", "example": "org_alex" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Workshop created successfully" },
+          "400": { "description": "Validation error" }
+        }
+      },
+      "get": {
+        "summary": "List all workshops",
+        "tags": ["Workshops"],
+        "parameters": [
+          { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["active", "cancelled"] } },
+          { "name": "organizerId", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "List of workshops" }
+        }
+      }
+    },
+    "/api/workshops/{id}": {
+      "get": {
+        "summary": "Get workshop details",
+        "tags": ["Workshops"],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Workshop details" },
+          "404": { "description": "Workshop not found" }
+        }
+      }
+    },
+    "/api/workshops/{id}/registrations": {
+      "post": {
+        "summary": "Register a member for a workshop",
+        "description": "Atomically persists registration and an asynchronous notification job inside a MongoDB transaction. Returns immediately without waiting for HTTP delivery.",
+        "tags": ["Registrations"],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["memberId", "destination"],
+                "properties": {
+                  "memberId": { "type": "string", "example": "member_jane" },
+                  "destination": { "type": "string", "example": "jane@example.com" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Member registered successfully and outbox job scheduled" },
+          "400": { "description": "Workshop is cancelled or request invalid" },
+          "404": { "description": "Workshop not found" },
+          "409": { "description": "Member is already registered for this workshop" }
+        }
+      },
+      "get": {
+        "summary": "List registered members for a workshop",
+        "tags": ["Registrations"],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "List of registrations" },
+          "404": { "description": "Workshop not found" }
+        }
+      }
+    },
+    "/api/workshops/{id}/cancel": {
+      "post": {
+        "summary": "Cancel a workshop and schedule member notifications",
+        "description": "Atomically cancels workshop and generates cancellation notification jobs for all registered members. Repeated requests are idempotent.",
+        "tags": ["Workshops"],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": { "type": "string", "example": "Speaker illness" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Workshop cancelled and cancellation jobs scheduled" },
+          "404": { "description": "Workshop not found" }
+        }
+      }
+    },
+    "/api/notifications/jobs": {
+      "get": {
+        "summary": "Inspect notification outbox jobs",
+        "tags": ["Notifications"],
+        "parameters": [
+          { "name": "workshopId", "in": "query", "schema": { "type": "string" } },
+          { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["pending", "processing", "delivered", "dead_lettered"] } },
+          { "name": "eventType", "in": "query", "schema": { "type": "string", "enum": ["registration_confirmation", "workshop_cancellation"] } }
+        ],
+        "responses": {
+          "200": { "description": "List of notification jobs with attempt history" }
+        }
+      }
+    }
+  }
+}
